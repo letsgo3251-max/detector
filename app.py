@@ -93,7 +93,14 @@ if not st.session_state.get("logged_in"):
         if google_oauth2:
             st.subheader("1-Click Authentication")
             authorization_url = asyncio.run(google_oauth2.get_authorization_url(REDIRECT_URI, scope=["email"]))
-            st.link_button("🌐 Continue with Google", url=authorization_url, use_container_width=True)
+            
+            # The "_top" attribute is the nuclear option that forces Streamlit's iframe to shatter
+            html_button = f'''
+            <a href="{authorization_url}" target="_top" style="display: block; width: 100%; padding: 10px; background-color: white; color: black; border: 1px solid #ccc; text-align: center; text-decoration: none; font-weight: bold; border-radius: 5px;">
+                🌐 Continue with Google
+            </a>
+            '''
+            st.markdown(html_button, unsafe_allow_html=True)
             st.divider()
         
         # Email & Pass Backup
