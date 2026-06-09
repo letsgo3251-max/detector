@@ -89,11 +89,11 @@ if not st.session_state.get("logged_in"):
     with st.sidebar:
         st.title("🛡️ Secure Access")
         
-        # Google SSO
+        # Google SSO Box
         if google_oauth2:
             st.subheader("1-Click Authentication")
             authorization_url = asyncio.run(google_oauth2.get_authorization_url(REDIRECT_URI, scope=["email"]))
-            st.markdown(f'<a href="{authorization_url}" target="_top" style="display: block; width: 100%; padding: 10px; background-color: white; color: black; border: 1px solid #ccc; text-align: center; text-decoration: none; font-weight: bold; border-radius: 5px;">Continue with Google</a>', unsafe_allow_html=True)
+            st.link_button("🌐 Continue with Google", url=authorization_url, use_container_width=True)
             st.divider()
         
         # Email & Pass Backup
