@@ -1,3 +1,6 @@
 streamlit
 openai
 pandas
+PyPDF2
+stripe
+httpx_oauth
