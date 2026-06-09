@@ -119,12 +119,7 @@ if not st.session_state.get("logged_in"):
         if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
             st.subheader("Fast Verification")
             auth_url = get_google_auth_url()
-            html_btn = f'''
-            <a href="{auth_url}" target="_top" style="display: block; width: 100%; padding: 10px; background-color: #f1f3f4; color: black; border: 1px solid #ccc; text-align: center; text-decoration: none; font-weight: bold; border-radius: 5px;">
-                <span style="color:#4285F4">G</span><span style="color:#EA4335">o</span><span style="color:#FBBC05">o</span><span style="color:#34A853">g</span><span style="color:#4285F4">l</span><span style="color:#EA4335">e</span> Continue
-            </a>
-            '''
-            st.markdown(html_btn, unsafe_allow_html=True)
+            st.link_button("🌐 Continue with Google", auth_url, use_container_width=True)
             st.divider()
         else:
             # Replaced silent blank link failure with explicit missing key notification 
