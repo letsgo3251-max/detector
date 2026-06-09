@@ -52,7 +52,7 @@ def check_premium_status(user_email):
 
 create_usertable()
 
-# ================= "REMEMBER ME" COOKIE MANAGER ================= #
+# ================= 10-YEAR "FOREVER" COOKIE MANAGER ================= #
 @st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
@@ -136,7 +136,7 @@ else:
             st.write("Upgrade for full capability:")
             # REPLACE BELOW WITH YOUR LIVE BUY.STRIPE LINK!
             st.link_button("💳 Upgrade ($4.99/mo)", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
-            st.caption("IMPORTANT: Ensure you use your login email at Stripe checkout to unlock premium automatically.")
+            st.caption("IMPORTANT: Make sure you use your exact login email at checkout to instantly unlock Premium.")
         
         st.divider()
         if st.button("Secure Log Out"):
@@ -156,7 +156,6 @@ def analyze_threat(text, is_premium):
     prompt = f"Analyze if this email is a scam. Score risk 0 to 100. Give precise advice.{prem}\nEmail Context:\n{text}"
     
     # Fully Free Round-Robin API Fallback Loop 
-    # Fast execution without API crashes, completely unchained from billing caps
     free_fallbacks = [
         "meta-llama/llama-3.3-70b-instruct:free",
         "google/gemini-2.0-pro-exp-02-05:free",
@@ -216,4 +215,4 @@ else:
     st.title("🛡️ Welcome to ScamGuard")
     st.subheader("Detect Gift Card Extortion, Fake PayPal Invoices, & Phishing")
     st.write("Leveraging our free local and enterprise deep-scan systems.")
-    st.error("🔒 Please look to the left menu: Select 'Sign Up For Free' to securely enter your dashboard!")
+    st.info("🔒 Look to the sidebar menu: **Log In or Sign Up (for free)** to build your local secure session now.")
