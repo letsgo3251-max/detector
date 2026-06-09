@@ -52,7 +52,7 @@ def check_premium_status(user_email):
 
 create_usertable()
 
-# ================= COOKIE ("REMEMBER ME") MANAGER ================= #
+# ================= "REMEMBER ME" COOKIE MANAGER ================= #
 @st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
@@ -62,7 +62,7 @@ cookie_manager = get_cookie_manager()
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
-# Auto-Login checking cookie memory
+# Auto-Login checking cookie memory in the background (Silently bypasses login)
 saved_user = cookie_manager.get(cookie="scamguard_user")
 if saved_user and not st.session_state["logged_in"]:
     st.session_state["logged_in"] = True
@@ -77,16 +77,34 @@ if not st.session_state.get("logged_in"):
         auth_mode = st.selectbox("Welcome. Select action:", ["Log In", "Sign Up For Free"])
         email = st.text_input("Email Address").lower().strip()
         password = st.text_input("Password", type='password')
-        remember_me = st.checkbox("Stay logged in for 30 days")
+        
+        # User Choice: Checkbox added here!
+        remember_me = st.checkbox("Keep me logged in forever")
+        
+        # Define 'forever' as a cookie lasting exactly 10 years (3650 days)
+        expire_date = datetime.datetime.now() + datetime.timedelta(days=3650)
         
         if auth_mode == "Sign Up For Free":
-            if st.button("Create Local Account"):
+            if st.button("Create Account & Sign In"):
                 if email and password:
                     try:
+                        # 1. Add user to database
                         add_user(email, hash_pswd(password))
-                        st.success("Account Created! You can now log in.")
+                        
+                        # 2. Instantly log them in directly
+                        st.session_state["logged_in"] = True
+                        st.session_state["user_email"] = email
+                        st.session_state["is_premium"] = check_premium_status(email)
+                        
+                        # 3. Permanently save to browser ONLY if they checked the box
+                        if remember_me:
+                            cookie_manager.set("scamguard_user", email, expires_at=expire_date)
+                            
+                        time.sleep(0.5) # Quick buffer for browser cache
+                        st.rerun()
+                        
                     except sqlite3.IntegrityError:
-                        st.error("Email is already registered. Please log in.")
+                        st.error("Email is already registered. Please change dropdown to Log In.")
                 else: 
                     st.warning("Please fill all fields.")
                     
@@ -97,11 +115,11 @@ if not st.session_state.get("logged_in"):
                     st.session_state["user_email"] = email
                     st.session_state["is_premium"] = check_premium_status(email)
                     
+                    # Permanently save to browser ONLY if they checked the box
                     if remember_me:
-                        # Drop a browser cookie lasting 30 days
-                        expire_date = datetime.datetime.now() + datetime.timedelta(days=30)
                         cookie_manager.set("scamguard_user", email, expires_at=expire_date)
-                    
+                        
+                    time.sleep(0.5)
                     st.rerun()
                 else: 
                     st.error("Incorrect Email or Password.")
@@ -116,13 +134,13 @@ else:
         else:
             st.warning("👤 Status: Free Account")
             st.write("Upgrade for full capability:")
-            # REPLACE STRIPE LINK BELOW LATER WITH YOUR ACTUAL PAYMENT LINK!
+            # REPLACE BELOW WITH YOUR LIVE BUY.STRIPE LINK!
             st.link_button("💳 Upgrade ($4.99/mo)", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
-            st.caption("IMPORTANT: Make sure you use this exact email at checkout to instantly upgrade your account.")
+            st.caption("IMPORTANT: Ensure you use your login email at Stripe checkout to unlock premium automatically.")
         
         st.divider()
         if st.button("Secure Log Out"):
-            # Delete cookie, clear state
+            # Delete permanent cookie & sign out
             cookie_manager.delete("scamguard_user")
             st.session_state["logged_in"] = False
             st.session_state["user_email"] = ""
@@ -138,7 +156,7 @@ def analyze_threat(text, is_premium):
     prompt = f"Analyze if this email is a scam. Score risk 0 to 100. Give precise advice.{prem}\nEmail Context:\n{text}"
     
     # Fully Free Round-Robin API Fallback Loop 
-    # (Fast execution without API crashes, completely unchained from billing caps)
+    # Fast execution without API crashes, completely unchained from billing caps
     free_fallbacks = [
         "meta-llama/llama-3.3-70b-instruct:free",
         "google/gemini-2.0-pro-exp-02-05:free",
@@ -154,9 +172,9 @@ def analyze_threat(text, is_premium):
             )
             return resp.choices[0].message.content
         except Exception:
-            time.sleep(0.5) # Instantly jump to fallback free server if first errors out
+            time.sleep(0.5) 
             continue
-    return "⚠️ Open internet routing congestion. Upgrade to Premium for unthrottled, dedicated API scanning."
+    return "⚠️ Open internet routing congestion. Try hitting scan again, or upgrade to Premium for dedicated API unthrottled queues."
 
 # ----------------- MAIN UI ----------------- #
 if st.session_state.get("logged_in"):
@@ -172,7 +190,7 @@ if st.session_state.get("logged_in"):
                     txt += " \n\n" + " ".join([p.extract_text() for p in pdf.pages if p.extract_text()])
                 else: 
                     txt += " \n\n" + file.getvalue().decode("utf-8")
-                st.info("Uploaded document successfully stripped of malicious executing elements and added to analysis block.")
+                st.info("Uploaded document successfully stripped of malicious elements and ready for analysis.")
             except Exception: 
                 st.error("Error reading attached file schema.")
 
@@ -183,7 +201,7 @@ if st.session_state.get("logged_in"):
             if st.session_state["is_premium"]:
                 found = extract_urls(txt)
                 if found:
-                    st.error(f"🛑 Warning! Traced {len(found)} masked internet linkages in transmission payload:")
+                    st.error(f"🛑 Warning! Traced {len(found)} masked internet hyperlinks in transmission payload:")
                     for u in found: st.code(u)
 
             with st.spinner("Deciphering text origins and spoof tactics using our decentralized engine array..."):
@@ -196,6 +214,6 @@ if st.session_state.get("logged_in"):
 else:
     # Completely logged-out presentation page
     st.title("🛡️ Welcome to ScamGuard")
-    st.subheader("Detect Gift Card Extortion, Invoice Splitting, & Phishing")
+    st.subheader("Detect Gift Card Extortion, Fake PayPal Invoices, & Phishing")
     st.write("Leveraging our free local and enterprise deep-scan systems.")
-    st.info("🔒 Look to the sidebar menu: **Log In or Sign Up (for free)** to build your local secure session now.")
+    st.error("🔒 Please look to the left menu: Select 'Sign Up For Free' to securely enter your dashboard!")
