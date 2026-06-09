@@ -20,7 +20,7 @@ STRIPE_KEY = st.secrets.get("STRIPE_API_KEY", "")
 GOOGLE_CLIENT_ID = st.secrets.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = st.secrets.get("GOOGLE_CLIENT_SECRET", "")
 
-# ⚠️ ENSURE THIS EXACTLY MATCHES YOUR AUTHORIZED URI IN GOOGLE CLOUD
+# ⚠️ ENSURE THIS MATCHES YOUR LIVE STREAMLIT LINK!
 REDIRECT_URI = "https://email-scam-detector.streamlit.app/"
 
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
@@ -44,7 +44,6 @@ def hash_pswd(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_premium_status(user_email):
-    """Securely checks your real Stripe account if this email pays the monthly fee."""
     if user_email == "admin@scamguard.com": return True 
     if not STRIPE_KEY: return False 
     try:
@@ -57,6 +56,7 @@ def check_premium_status(user_email):
 
 # ================= NATIVE GOOGLE SSO ================= #
 def get_google_auth_url():
+    if not GOOGLE_CLIENT_ID: return "#"
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -66,7 +66,6 @@ def get_google_auth_url():
     return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
 
 def verify_google_code(code):
-    """Securely requests token and returns user email."""
     try:
         r = requests.post("https://oauth2.googleapis.com/token", data={
             "code": code,
@@ -83,31 +82,34 @@ def verify_google_code(code):
         return None
 
 # ================= AUTH MEMORY (COOKIE) MANAGER ================= #
-# Notice we completely removed the cache wrapper to resolve the "CachedWidgetWarning" error
 cookie_manager = stx.CookieManager(key="sg_cookies")
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
-# Auto-login checking 10-year browser cookie
 saved_user = cookie_manager.get(cookie="scamguard_user")
 if saved_user and not st.session_state["logged_in"]:
     st.session_state["logged_in"] = True
     st.session_state["user_email"] = saved_user
     st.session_state["is_premium"] = check_premium_status(saved_user)
 
-# Intercept Google login callback code from the URL cleanly
+expire_date = datetime.datetime.now() + datetime.timedelta(days=3650)
+
 if not st.session_state.get("logged_in") and st.query_params.get("code"):
-    with st.spinner("Securely validating Google credentials..."):
+    with st.spinner("Securely verifying Identity Matrix..."):
         user_email = verify_google_code(st.query_params.get("code"))
         if user_email:
             st.session_state["logged_in"] = True
             st.session_state["user_email"] = user_email
             st.session_state["is_premium"] = check_premium_status(user_email)
             st.query_params.clear() 
+            
+            # Upgraded Feature: Ensure Google Log-ins are ALSO remembered for 10 years!
+            cookie_manager.set("scamguard_user", user_email, expires_at=expire_date)
+            time.sleep(1) # CRITICAL: Gives browser time to store the new cookie.
             st.rerun()
         else:
-            st.error("Google authentication failed. Please try standard login.")
+            st.error("Authentication halted by gateway. Switch to Local Passkeys.")
             st.query_params.clear()
 
 # ================= MAIN LOGIN UI ================= #
@@ -115,22 +117,18 @@ if not st.session_state.get("logged_in"):
     with st.sidebar:
         st.title("🛡️ Secure Access")
         
-        # --- Clean Native Google Box ---
-        if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+        if GOOGLE_CLIENT_ID:
             st.subheader("Fast Verification")
             auth_url = get_google_auth_url()
             st.link_button("🌐 Continue with Google", auth_url, use_container_width=True)
             st.divider()
         else:
-            # Replaced silent blank link failure with explicit missing key notification 
-            st.error("🔑 Notice to Admin: Google Cloud Client keys missing from the Streamlit Cloud Dashboard 'Secrets' Panel.")
+            st.error("🔑 Notice to Admin: Setup APIs in Streamlit settings.")
         
-        # --- Local Accounts Backup ---
         auth_mode = st.selectbox("Backup Login Method", ["Log In", "Sign Up For Free"])
         email = st.text_input("Email Address").lower().strip()
         password = st.text_input("Password", type='password')
         remember_me = st.checkbox("Keep me logged in forever")
-        expire_date = datetime.datetime.now() + datetime.timedelta(days=3650)
         
         if auth_mode == "Sign Up For Free":
             if st.button("Create Account"):
@@ -140,10 +138,12 @@ if not st.session_state.get("logged_in"):
                         st.session_state["logged_in"] = True
                         st.session_state["user_email"] = email
                         st.session_state["is_premium"] = check_premium_status(email)
-                        if remember_me: cookie_manager.set("scamguard_user", email, expires_at=expire_date)
-                        time.sleep(0.5) 
+                        
+                        if remember_me: 
+                            cookie_manager.set("scamguard_user", email, expires_at=expire_date)
+                        time.sleep(1) # CRITICAL Buffer
                         st.rerun()
-                    except sqlite3.IntegrityError: st.error("Email is registered. Change tab to Log In.")
+                    except sqlite3.IntegrityError: st.error("Email is registered.")
                 else: st.warning("Please fill all fields.")
                     
         elif auth_mode == "Log In":
@@ -152,8 +152,10 @@ if not st.session_state.get("logged_in"):
                     st.session_state["logged_in"] = True
                     st.session_state["user_email"] = email
                     st.session_state["is_premium"] = check_premium_status(email)
-                    if remember_me: cookie_manager.set("scamguard_user", email, expires_at=expire_date)
-                    time.sleep(0.5)
+                    
+                    if remember_me: 
+                        cookie_manager.set("scamguard_user", email, expires_at=expire_date)
+                    time.sleep(1) # CRITICAL Buffer
                     st.rerun()
                 else: st.error("Incorrect Email or Password.")
 else:
@@ -166,14 +168,25 @@ else:
             st.markdown("* ✅ File Upload Scans\n* ✅ Malicious Deep Trace\n* ✅ Priority Fast Nodes")
         else:
             st.warning("👤 Status: Free Account")
-            # ⚠️ PASTE YOUR STRIPE BUY LINK ON THIS LINE!!!
+            
+            # ⚠️ ADD YOUR REAL STRIPE BUY LINK ON THIS LINE:
             st.link_button("💳 Upgrade for Full Capabilities", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
             st.caption("Please checkout using the exact email you are logged in with to instantly activate your benefits.")
             
         st.divider()
         if st.button("Secure Log Out"):
-            cookie_manager.delete("scamguard_user")
+            # Turn variables off
             st.session_state["logged_in"] = False
+            st.session_state["user_email"] = ""
+            st.session_state["is_premium"] = False
+            st.query_params.clear()
+            
+            # Send javascript request to browser to burn cookie keys
+            cookie_manager.delete("scamguard_user")
+            
+            # MASSIVELY IMPORTANT SLEEP TIMER: Allows browser to clear its system tracking cookies successfully before Streamlit reboots page 
+            with st.spinner("Securely ending private instance session..."):
+                time.sleep(1.5)
             st.rerun()
 
 # ================= CORE AI ANALYSIS LOGIC ================= #
@@ -229,4 +242,4 @@ else:
     st.title("🛡️ Welcome to ScamGuard Identity Protector")
     st.subheader("Stop the $3 billion a year phishing crisis locally on your computer.")
     st.write("Scan deep emails against malicious intent networks dynamically through secure open routers globally for completely zero cost limitations")
-    st.error("🔒 Please expand the left sidebar menu and sign in securely to deploy dashboard environments ->")
+    st.error("🔒 Please expand the left sidebar menu to sign in securely and deploy your private instance hub!")
