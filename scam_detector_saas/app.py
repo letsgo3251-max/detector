@@ -10,7 +10,7 @@ st.sidebar.markdown("""
 * ✅ Scan Malicious URLs & PDFs
 * ✅ Forward Emails to Scan (API access)
 """)
-st.sidebar.link_button("💳 Subscribe to Premium ($4.99/mo)", "https://stripe.com/")
+st.sidebar.link_button("💳 Subscribe to Premium ($4.99/mo)", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
 
 # Fetch OpenRouter API key securely
 API_KEY = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
