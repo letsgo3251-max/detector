@@ -4,5 +4,4 @@ pandas
 PyPDF2
 stripe
 extra-streamlit-components
-httpx_oauth
-nest_asyncio
+requests
