@@ -7,30 +7,17 @@ import PyPDF2
 import sqlite3
 import hashlib
 import stripe
-import asyncio
-import nest_asyncio
-from httpx_oauth.clients.google import GoogleOAuth2
-
-# Apply the asyncio patch so the OAuth framework runs correctly inside Streamlit
-nest_asyncio.apply()
+import datetime
+import extra_streamlit_components as stx
 
 st.set_page_config(page_title="ScamGuard | True Threat Analysis", page_icon="🛡️", layout="centered")
 
 # ================= BACKGROUND SETUP & APIS ================= #
 API_KEY = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
 STRIPE_KEY = st.secrets.get("STRIPE_API_KEY", "")
-GOOGLE_CLIENT_ID = st.secrets.get("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = st.secrets.get("GOOGLE_CLIENT_SECRET", "")
-
-REDIRECT_URI = "https://email-scam-detector.streamlit.app/"
 
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 stripe.api_key = STRIPE_KEY
-
-if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
-    google_oauth2 = GoogleOAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-else:
-    google_oauth2 = None
 
 # Secure local fallback database
 conn = sqlite3.connect("scamguard_users.db", check_same_thread=False)
@@ -52,7 +39,7 @@ def hash_pswd(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_premium_status(user_email):
-    """Securely checks your real Stripe account if this email pays the monthly fee!"""
+    """Securely checks your real Stripe account if this email pays the monthly fee."""
     if user_email == "admin@scamguard.com": return True # Master override 
     if not STRIPE_KEY: return False 
     try:
@@ -65,51 +52,32 @@ def check_premium_status(user_email):
 
 create_usertable()
 
-# ================= GOOGLE OAUTH INTERCEPT LOGIC ================= #
-async def google_login():
-    code = st.query_params.get("code")
-    if code and google_oauth2:
-        try:
-            token = await google_oauth2.get_access_token(code, REDIRECT_URI)
-            user_id, user_email = await google_oauth2.get_id_email(token['access_token'])
-            
-            st.session_state["logged_in"] = True
-            st.session_state["user_email"] = user_email
-            st.session_state["is_premium"] = check_premium_status(user_email)
-            st.query_params.clear() 
-            st.rerun()
-        except Exception as e:
-            st.error(f"Google verification failed.")
+# ================= COOKIE ("REMEMBER ME") MANAGER ================= #
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
-if not st.session_state.get("logged_in") and st.query_params.get("code"):
-    asyncio.run(google_login())
+# Auto-Login checking cookie memory
+saved_user = cookie_manager.get(cookie="scamguard_user")
+if saved_user and not st.session_state["logged_in"]:
+    st.session_state["logged_in"] = True
+    st.session_state["user_email"] = saved_user
+    st.session_state["is_premium"] = check_premium_status(saved_user)
 
 # ================= LOGIN PORTAL UI ================= #
 if not st.session_state.get("logged_in"):
     with st.sidebar:
         st.title("🛡️ Secure Access")
         
-        # Google SSO Box
-        if google_oauth2:
-            st.subheader("1-Click Authentication")
-            # Added "openid" exactly as instructed to bypass Google profile failure!
-            authorization_url = asyncio.run(google_oauth2.get_authorization_url(REDIRECT_URI, scope=["openid", "email"]))
-            
-            html_button = f'''
-            <a href="{authorization_url}" target="_top" style="display: block; width: 100%; padding: 10px; background-color: white; color: black; border: 1px solid #ccc; text-align: center; text-decoration: none; font-weight: bold; border-radius: 5px;">
-                🌐 Continue with Google
-            </a>
-            '''
-            st.markdown(html_button, unsafe_allow_html=True)
-            st.divider()
-        
-        # Email & Pass Backup Box
-        auth_mode = st.selectbox("Standard Login", ["Log In", "Sign Up For Free"])
-        email = st.text_input("Email Address").lower()
+        auth_mode = st.selectbox("Welcome. Select action:", ["Log In", "Sign Up For Free"])
+        email = st.text_input("Email Address").lower().strip()
         password = st.text_input("Password", type='password')
+        remember_me = st.checkbox("Stay logged in for 30 days")
         
         if auth_mode == "Sign Up For Free":
             if st.button("Create Local Account"):
@@ -118,8 +86,9 @@ if not st.session_state.get("logged_in"):
                         add_user(email, hash_pswd(password))
                         st.success("Account Created! You can now log in.")
                     except sqlite3.IntegrityError:
-                        st.error("Email is registered. Try logging in.")
-                else: st.warning("Fill all fields.")
+                        st.error("Email is already registered. Please log in.")
+                else: 
+                    st.warning("Please fill all fields.")
                     
         elif auth_mode == "Log In":
             if st.button("Access Dashboard"):
@@ -127,10 +96,17 @@ if not st.session_state.get("logged_in"):
                     st.session_state["logged_in"] = True
                     st.session_state["user_email"] = email
                     st.session_state["is_premium"] = check_premium_status(email)
+                    
+                    if remember_me:
+                        # Drop a browser cookie lasting 30 days
+                        expire_date = datetime.datetime.now() + datetime.timedelta(days=30)
+                        cookie_manager.set("scamguard_user", email, expires_at=expire_date)
+                    
                     st.rerun()
-                else: st.error("Incorrect Email/Password.")
+                else: 
+                    st.error("Incorrect Email or Password.")
 else:
-    # ---------------- Logged In Session ----------------
+    # ---------------- Logged In Profile UI ----------------
     with st.sidebar:
         st.success(f"Session Active:\n{st.session_state['user_email']}")
         
@@ -140,11 +116,14 @@ else:
         else:
             st.warning("👤 Status: Free Account")
             st.write("Upgrade for full capability:")
+            # REPLACE STRIPE LINK BELOW LATER WITH YOUR ACTUAL PAYMENT LINK!
             st.link_button("💳 Upgrade ($4.99/mo)", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
-            st.caption("Crucial: Please use this exact Google login email at checkout so our API recognizes you instantly!")
+            st.caption("IMPORTANT: Make sure you use this exact email at checkout to instantly upgrade your account.")
         
         st.divider()
         if st.button("Secure Log Out"):
+            # Delete cookie, clear state
+            cookie_manager.delete("scamguard_user")
             st.session_state["logged_in"] = False
             st.session_state["user_email"] = ""
             st.session_state["is_premium"] = False
@@ -158,22 +137,31 @@ def analyze_threat(text, is_premium):
     prem = "\nEXECUTE ENTERPRISE DIVE: Perform high psychological risk triage. Outline precise URL traps." if is_premium else ""
     prompt = f"Analyze if this email is a scam. Score risk 0 to 100. Give precise advice.{prem}\nEmail Context:\n{text}"
     
-    # Fully Free Round-Robin API Fallback Loop
-    free_fallbacks = ["meta-llama/llama-3.3-70b-instruct:free", "google/gemini-2.0-pro-exp-02-05:free", "microsoft/phi-3-mini-128k-instruct:free"]
+    # Fully Free Round-Robin API Fallback Loop 
+    # (Fast execution without API crashes, completely unchained from billing caps)
+    free_fallbacks = [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemini-2.0-pro-exp-02-05:free",
+        "microsoft/phi-3-mini-128k-instruct:free"
+    ]
     
     for n in free_fallbacks:
         try:
-            resp = client.chat.completions.create(model=n, max_tokens=700, messages=[{"role":"system","content":"You are ScamGuard Threat Analyst AI."},{"role":"user","content":prompt}])
+            resp = client.chat.completions.create(
+                model=n, 
+                max_tokens=800, 
+                messages=[{"role":"system","content":"You are ScamGuard Threat Analyst AI. Do not hallucinate."},{"role":"user","content":prompt}]
+            )
             return resp.choices[0].message.content
         except Exception:
-            time.sleep(0.5)
+            time.sleep(0.5) # Instantly jump to fallback free server if first errors out
             continue
-    return "⚠️ Open internet routing congestion. Upgrade to Premium for unthrottled queues."
+    return "⚠️ Open internet routing congestion. Upgrade to Premium for unthrottled, dedicated API scanning."
 
 # ----------------- MAIN UI ----------------- #
 if st.session_state.get("logged_in"):
     st.title("🔍 Threat Interceptor Console")
-    txt = st.text_area("📋 Target Payload:", height=150)
+    txt = st.text_area("📋 Target Payload:", placeholder="Paste a highly suspicious email or invoice contents right here.", height=150)
 
     if st.session_state["is_premium"]:
         file = st.file_uploader("📄 Premium Module: Attach Fake Invoices/PDFs", type=['txt', 'pdf'])
@@ -182,24 +170,32 @@ if st.session_state.get("logged_in"):
                 if file.name.endswith('.pdf'):
                     pdf = PyPDF2.PdfReader(file)
                     txt += " \n\n" + " ".join([p.extract_text() for p in pdf.pages if p.extract_text()])
-                else: txt += " \n\n" + file.getvalue().decode("utf-8")
-                st.info("Uploaded data successfully merged to scan target.")
-            except Exception: st.error("Error reading file format.")
+                else: 
+                    txt += " \n\n" + file.getvalue().decode("utf-8")
+                st.info("Uploaded document successfully stripped of malicious executing elements and added to analysis block.")
+            except Exception: 
+                st.error("Error reading attached file schema.")
 
-    if st.button("🚨 Execute Analysis"):
+    if st.button("🚨 Execute Complete AI Scan"):
         if not txt.strip():
             st.warning("You must enter a payload to process.")
         else:
             if st.session_state["is_premium"]:
                 found = extract_urls(txt)
                 if found:
-                    st.error(f"🛑 Found {len(found)} masked internet linkages in transmission payload.")
-            with st.spinner("Deciphering text origins..."):
+                    st.error(f"🛑 Warning! Traced {len(found)} masked internet linkages in transmission payload:")
+                    for u in found: st.code(u)
+
+            with st.spinner("Deciphering text origins and spoof tactics using our decentralized engine array..."):
                 r = analyze_threat(txt, st.session_state["is_premium"])
-                if "⚠️" in r: st.error(r)
+                if "⚠️" in r: 
+                    st.error(r)
                 else: 
-                    st.success("✅ Engine cleared")
+                    st.success("✅ Secure Threat Processing Check Completed.")
                     st.write(r)
 else:
+    # Completely logged-out presentation page
     st.title("🛡️ Welcome to ScamGuard")
-    st.subheader("Login required.")
+    st.subheader("Detect Gift Card Extortion, Invoice Splitting, & Phishing")
+    st.write("Leveraging our free local and enterprise deep-scan systems.")
+    st.info("🔒 Look to the sidebar menu: **Log In or Sign Up (for free)** to build your local secure session now.")

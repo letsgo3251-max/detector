@@ -3,5 +3,4 @@ openai
 pandas
 PyPDF2
 stripe
-httpx_oauth
-nest_asyncio
+extra-streamlit-components
