@@ -55,9 +55,8 @@ def check_premium_status(user_email):
     except Exception:
         return False
 
-# ================= NATIVE GOOGLE SSO (No Async Overrides Needed) ================= #
+# ================= NATIVE GOOGLE SSO ================= #
 def get_google_auth_url():
-    if not GOOGLE_CLIENT_ID: return "#"
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -84,11 +83,9 @@ def verify_google_code(code):
         return None
 
 # ================= AUTH MEMORY (COOKIE) MANAGER ================= #
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
+# Notice we completely removed the cache wrapper to resolve the "CachedWidgetWarning" error
+cookie_manager = stx.CookieManager(key="sg_cookies")
 
-cookie_manager = get_cookie_manager()
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
@@ -119,7 +116,7 @@ if not st.session_state.get("logged_in"):
         st.title("🛡️ Secure Access")
         
         # --- Clean Native Google Box ---
-        if GOOGLE_CLIENT_ID:
+        if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
             st.subheader("Fast Verification")
             auth_url = get_google_auth_url()
             html_btn = f'''
@@ -129,6 +126,9 @@ if not st.session_state.get("logged_in"):
             '''
             st.markdown(html_btn, unsafe_allow_html=True)
             st.divider()
+        else:
+            # Replaced silent blank link failure with explicit missing key notification 
+            st.error("🔑 Notice to Admin: Google Cloud Client keys missing from the Streamlit Cloud Dashboard 'Secrets' Panel.")
         
         # --- Local Accounts Backup ---
         auth_mode = st.selectbox("Backup Login Method", ["Log In", "Sign Up For Free"])
@@ -171,7 +171,7 @@ else:
             st.markdown("* ✅ File Upload Scans\n* ✅ Malicious Deep Trace\n* ✅ Priority Fast Nodes")
         else:
             st.warning("👤 Status: Free Account")
-            # ⚠️ ADD YOUR REAL STRIPE URL RIGHT BELOW HERE:
+            # ⚠️ PASTE YOUR STRIPE BUY LINK ON THIS LINE!!!
             st.link_button("💳 Upgrade for Full Capabilities", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
             st.caption("Please checkout using the exact email you are logged in with to instantly activate your benefits.")
             
@@ -232,6 +232,6 @@ if st.session_state.get("logged_in"):
                     st.write(r)
 else:
     st.title("🛡️ Welcome to ScamGuard Identity Protector")
-    st.subheader("Stop the $3 billion a year phishing crisis on your personal devices.")
-    st.write("Scan deep emails against malicious intent networks dynamically through secure global APIs.")
-    st.error("🔒 Please expand the left sidebar menu and click 'Google Continue' to safely test our application dashboard right now.")
+    st.subheader("Stop the $3 billion a year phishing crisis locally on your computer.")
+    st.write("Scan deep emails against malicious intent networks dynamically through secure open routers globally for completely zero cost limitations")
+    st.error("🔒 Please expand the left sidebar menu and sign in securely to deploy dashboard environments ->")
