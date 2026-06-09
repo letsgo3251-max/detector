@@ -8,13 +8,9 @@ import sqlite3
 import hashlib
 import stripe
 import datetime
-import asyncio
-import nest_asyncio
-from httpx_oauth.clients.google import GoogleOAuth2
+import urllib.parse
+import requests
 import extra_streamlit_components as stx
-
-# Patch Streamlit's event loop to support Google Auth correctly
-nest_asyncio.apply()
 
 st.set_page_config(page_title="ScamGuard | True Threat Analysis", page_icon="🛡️", layout="centered")
 
@@ -29,11 +25,6 @@ REDIRECT_URI = "https://email-scam-detector.streamlit.app/"
 
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=API_KEY)
 stripe.api_key = STRIPE_KEY
-
-if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
-    google_oauth2 = GoogleOAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
-else:
-    google_oauth2 = None
 
 # Secure local fallback database
 conn = sqlite3.connect("scamguard_users.db", check_same_thread=False)
@@ -64,62 +55,82 @@ def check_premium_status(user_email):
     except Exception:
         return False
 
+# ================= NATIVE GOOGLE SSO (No Async Overrides Needed) ================= #
+def get_google_auth_url():
+    if not GOOGLE_CLIENT_ID: return "#"
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile"
+    }
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+
+def verify_google_code(code):
+    """Securely requests token and returns user email."""
+    try:
+        r = requests.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": REDIRECT_URI,
+            "grant_type": "authorization_code",
+        })
+        access_token = r.json().get("access_token")
+        if not access_token: return None
+        res = requests.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+        return res.json().get("email")
+    except Exception:
+        return None
+
 # ================= AUTH MEMORY (COOKIE) MANAGER ================= #
 @st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
 
 cookie_manager = get_cookie_manager()
-
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
-# Auto-login via local Cookie Memory
+# Auto-login checking 10-year browser cookie
 saved_user = cookie_manager.get(cookie="scamguard_user")
 if saved_user and not st.session_state["logged_in"]:
     st.session_state["logged_in"] = True
     st.session_state["user_email"] = saved_user
     st.session_state["is_premium"] = check_premium_status(saved_user)
 
-# ================= GOOGLE OAUTH INTERCEPT LOGIC ================= #
-async def google_login():
-    code = st.query_params.get("code")
-    if code and google_oauth2:
-        try:
-            token = await google_oauth2.get_access_token(code, REDIRECT_URI)
-            user_id, user_email = await google_oauth2.get_id_email(token['access_token'])
-            
+# Intercept Google login callback code from the URL cleanly
+if not st.session_state.get("logged_in") and st.query_params.get("code"):
+    with st.spinner("Securely validating Google credentials..."):
+        user_email = verify_google_code(st.query_params.get("code"))
+        if user_email:
             st.session_state["logged_in"] = True
             st.session_state["user_email"] = user_email
             st.session_state["is_premium"] = check_premium_status(user_email)
             st.query_params.clear() 
             st.rerun()
-        except Exception:
-            st.error("Google authentication interrupted. Try standard login.")
+        else:
+            st.error("Google authentication failed. Please try standard login.")
+            st.query_params.clear()
 
-if not st.session_state.get("logged_in") and st.query_params.get("code"):
-    asyncio.run(google_login())
-
-# ================= MAIN UI ================= #
+# ================= MAIN LOGIN UI ================= #
 if not st.session_state.get("logged_in"):
     with st.sidebar:
         st.title("🛡️ Secure Access")
         
-        # --- Google SSO Area ---
-        if google_oauth2:
+        # --- Clean Native Google Box ---
+        if GOOGLE_CLIENT_ID:
             st.subheader("Fast Verification")
-            # We specifically add "openid" parameter as instructed, preventing stealth failures
-            authorization_url = asyncio.run(google_oauth2.get_authorization_url(REDIRECT_URI, scope=["openid", "email"]))
-            # target="_top" safely obliterates the iframe and routes correctly to Google servers
+            auth_url = get_google_auth_url()
             html_btn = f'''
-            <a href="{authorization_url}" target="_top" style="display: block; width: 100%; padding: 10px; background-color: #f1f3f4; color: black; border: 1px solid #ccc; text-align: center; text-decoration: none; font-weight: bold; border-radius: 5px;">
+            <a href="{auth_url}" target="_top" style="display: block; width: 100%; padding: 10px; background-color: #f1f3f4; color: black; border: 1px solid #ccc; text-align: center; text-decoration: none; font-weight: bold; border-radius: 5px;">
                 <span style="color:#4285F4">G</span><span style="color:#EA4335">o</span><span style="color:#FBBC05">o</span><span style="color:#34A853">g</span><span style="color:#4285F4">l</span><span style="color:#EA4335">e</span> Continue
             </a>
             '''
             st.markdown(html_btn, unsafe_allow_html=True)
             st.divider()
         
-        # --- Email & Password Backup ---
+        # --- Local Accounts Backup ---
         auth_mode = st.selectbox("Backup Login Method", ["Log In", "Sign Up For Free"])
         email = st.text_input("Email Address").lower().strip()
         password = st.text_input("Password", type='password')
@@ -127,7 +138,7 @@ if not st.session_state.get("logged_in"):
         expire_date = datetime.datetime.now() + datetime.timedelta(days=3650)
         
         if auth_mode == "Sign Up For Free":
-            if st.button("Create Backup Account"):
+            if st.button("Create Account"):
                 if email and password:
                     try:
                         add_user(email, hash_pswd(password))
@@ -137,7 +148,7 @@ if not st.session_state.get("logged_in"):
                         if remember_me: cookie_manager.set("scamguard_user", email, expires_at=expire_date)
                         time.sleep(0.5) 
                         st.rerun()
-                    except sqlite3.IntegrityError: st.error("Email is registered.")
+                    except sqlite3.IntegrityError: st.error("Email is registered. Change tab to Log In.")
                 else: st.warning("Please fill all fields.")
                     
         elif auth_mode == "Log In":
@@ -151,24 +162,26 @@ if not st.session_state.get("logged_in"):
                     st.rerun()
                 else: st.error("Incorrect Email or Password.")
 else:
-    # --- Inside User Dashboard Sidebar ---
+    # ---------------- Active Hub Session ----------------
     with st.sidebar:
         st.success(f"Verified Identity:\n{st.session_state['user_email']}")
         
         if st.session_state["is_premium"]:
-            st.info("💎 PREMIUM USER")
-            st.markdown("* ✅ File Upload Scans\n* ✅ Deep Trapping Enabled")
+            st.info("💎 Status: PREMIUM USER")
+            st.markdown("* ✅ File Upload Scans\n* ✅ Malicious Deep Trace\n* ✅ Priority Fast Nodes")
         else:
-            st.warning("👤 Standard Security Tier")
-            st.link_button("💳 Upgrade for Full Protections ($4.99)", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
-            st.caption("Using your checkout email upgrades you automatically.")
+            st.warning("👤 Status: Free Account")
+            # ⚠️ ADD YOUR REAL STRIPE URL RIGHT BELOW HERE:
+            st.link_button("💳 Upgrade for Full Capabilities", "https://buy.stripe.com/8x2aEYaOsbkSb4h9re9bO00")
+            st.caption("Please checkout using the exact email you are logged in with to instantly activate your benefits.")
             
         st.divider()
-        if st.button("Disconnect Session"):
+        if st.button("Secure Log Out"):
             cookie_manager.delete("scamguard_user")
             st.session_state["logged_in"] = False
             st.rerun()
 
+# ================= CORE AI ANALYSIS LOGIC ================= #
 def extract_urls(text):
     return re.findall(r'(https?://[^\s]+)', text)
 
@@ -184,15 +197,15 @@ def analyze_threat(text, is_premium):
         except Exception:
             time.sleep(0.5)
             continue
-    return "⚠️ Server network traffic bottlenecking detected. Click scan again, or upgrade for bypass lanes."
+    return "⚠️ Server network traffic bottlenecking detected. Click scan again."
 
-# --- Active Security Scan Module ---
+# --- Security Scanner Interface ---
 if st.session_state.get("logged_in"):
     st.title("🛡️ Secure Email Processing Node")
     txt = st.text_area("📋 Insert suspicious mail contents or link here:", height=150)
 
     if st.session_state["is_premium"]:
-        file = st.file_uploader("📄 Attach Suspicious Invoice or PDF Form", type=['txt', 'pdf'])
+        file = st.file_uploader("📄 Premium Module: Attach Fake Invoices/PDFs", type=['txt', 'pdf'])
         if file:
             try:
                 if file.name.endswith('.pdf'):
@@ -219,6 +232,6 @@ if st.session_state.get("logged_in"):
                     st.write(r)
 else:
     st.title("🛡️ Welcome to ScamGuard Identity Protector")
-    st.subheader("Stop the $3 billion a year phishing crisis locally on your computer.")
-    st.write("Scan deep emails against malicious intent networks dynamically through secure open routers globally for completely zero cost limitations")
-    st.error("🔒 Expand Sidebar to securely bridge Google SSO or define local network credential protocols immediately to deploy dashboard environments ->")
+    st.subheader("Stop the $3 billion a year phishing crisis on your personal devices.")
+    st.write("Scan deep emails against malicious intent networks dynamically through secure global APIs.")
+    st.error("🔒 Please expand the left sidebar menu and click 'Google Continue' to safely test our application dashboard right now.")
