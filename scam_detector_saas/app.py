@@ -18,11 +18,19 @@ st.set_page_config(page_title="ScamGuard | Scam Detector", page_icon="🛡️", 
 # ================= DELETE WATERMARKS & STYLE THE UI ================= #
 st.markdown("""
     <style>
-    /* Aggressively hide the bottom-right 'Hosted by Streamlit' watermark & header icons */
-    .viewerBadge_container { display: none !important; }
+    /* Aggressively hide the bottom-right 'Hosted by Streamlit' watermark, Github Logo, & headers! */
+    [class^="viewerBadge_container"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    [class^="viewerBadge_link"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    #MainMenu { visibility: hidden !important; }
+    footer { display: none !important; visibility: hidden !important; }
+    header { visibility: hidden !important; }
     [data-testid="stDecoration"] { display: none !important; }
-    [data-testid="stToolbar"] { display: none !important; }
-    footer { visibility: hidden !important; }
     
     /* Make standard Streamlit buttons blue */
     div.stButton > button:first-child {
@@ -221,7 +229,7 @@ else:
             st.session_state["logged_in"] = False
             st.session_state["user_email"] = ""
             st.session_state["is_premium"] = False
-            time.sleep(1) # Silent sleep handles clean cookie logout
+            time.sleep(1) # Silent sleep handles clean cookie logout without flashing error
             st.rerun()
 
     def analyze_threat(text, is_premium):
